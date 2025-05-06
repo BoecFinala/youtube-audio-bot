@@ -23,7 +23,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ydl_opts = {
                 'format': 'mp4',
                 'outtmpl': 'video.mp4',
-                'cookiefile': 'cookies.json',  # ← подключаем файл с куками
+                'cookiefile': 'cookies.txt',  # ← подключаем файл с куками
             }
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([url])
