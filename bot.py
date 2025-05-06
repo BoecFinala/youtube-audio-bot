@@ -1,14 +1,21 @@
 import os
-import aiohttp
+import logging
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
+import requests  # Заменяем aiohttp на синхронные запросы
 
-TOKEN = '8027258642:AAFjyM9Bze0bXITSOKKwBYjnxJ5Vt6JpLAk'
+# Настройка логгера
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
 
-# Настройки API (обновленные)
-RAPID_API_URL = "https://youtube-mp3.p.rapidapi.com/get"
-RAPID_API_KEY = "d6b3cbc8c6msh937aca5d90c4dc5p1c1a7fjsn8d19c67c0361"
+# Безопасное хранение данных
+TOKEN = os.getenv("8027258642:AAFjyM9Bze0bXITSOKKwBYjnxJ5Vt6JpLAk")  # Получаем из переменных окружения
+RAPID_API_KEY = os.getenv("d6b3cbc8c6msh937aca5d90c4dc5p1c1a7fjsn8d19c67c0361")
 RAPID_API_HOST = "youtube-mp3.p.rapidapi.com"
+RAPID_API_URL = "https://youtube-mp3.p.rapidapi.com/get"
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🎵 Привет! Пришли ссылку на YouTube видео, и я отправлю тебе аудио!")
@@ -16,55 +23,52 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = update.message.text.strip()
     
-    if not ("youtube.com" in url or "youtu.be" in url):
-        await update.message.reply_text("⚠️ Пожалуйста, отправьте корректную YouTube ссылку")
-        return
-
-    await update.message.reply_text("⏳ Обрабатываю запрос...")
-    
     try:
+        # Проверка и извлечение ID
         video_id = extract_video_id(url)
         if not video_id:
-            raise ValueError("Не удалось извлечь ID видео")
+            raise ValueError("Некорректная YouTube ссылка")
+        
+        await update.message.reply_text("⏳ Обрабатываю запрос...")
 
-        async with aiohttp.ClientSession() as session:
-            async with session.get(
-                RAPID_API_URL,
-                headers={
-                    "X-RapidAPI-Key": RAPID_API_KEY,
-                    "X-RapidAPI-Host": RAPID_API_HOST
-                },
-                params={"id": video_id}
-            ) as response:
-                
-                if response.status != 200:
-                    error_text = await response.text()
-                    raise Exception(f"API Error {response.status}: {error_text}")
-                
-                data = await response.json()
-                
-                if data.get("status") != "ok":
-                    raise Exception(f"Сервисная ошибка: {data.get('msg', 'Unknown error')}")
-                
-                download_link = data.get("link")
-                title = f"{data.get('title', 'audio')}.mp3".replace("/", "_")
+        # Отправка запроса к API
+        response = requests.get(
+            RAPID_API_URL,
+            headers={
+                "X-RapidAPI-Key": RAPID_API_KEY,
+                "X-RapidAPI-Host": RAPID_API_HOST
+            },
+            params={"id": video_id}
+        )
 
-                await update.message.reply_audio(
-                    audio=download_link,
-                    title=title[:64],  # Ограничение Telegram
-                    performer="YouTube Audio Bot"
-                )
+        if response.status_code != 200:
+            raise Exception(f"Ошибка API: {response.text}")
+
+        data = response.json()
+        
+        if data.get("status") != "ok":
+            raise Exception(data.get("msg", "Неизвестная ошибка сервиса"))
+
+        # Отправка аудио
+        await update.message.reply_audio(
+            audio=data['link'],
+            title=f"{data.get('title', 'audio')[:64]}.mp3",
+            performer="YouTube Audio Bot"
+        )
 
     except Exception as e:
+        logger.error(f"Error: {str(e)}")
         await update.message.reply_text(f"❌ Ошибка: {str(e)}")
 
 def extract_video_id(url: str) -> str:
-    # Извлечение ID видео из разных форматов ссылок
+    # Улучшенная обработка разных форматов ссылок
+    if "youtube.com/watch?v=" in url:
+        return url.split("v=")[1].split("&")[0]
     if "youtu.be/" in url:
-        return url.split("youtu.be/")[-1].split("?")[0]
-    if "v=" in url:
-        return url.split("v=")[-1].split("&")[0]
-    return url.split("/")[-1]
+        return url.split("youtu.be/")[1].split("?")[0]
+    if "youtube.com/embed/" in url:
+        return url.split("embed/")[1].split("?")[0]
+    return None
 
 def main():
     application = Application.builder().token(TOKEN).build()
@@ -72,7 +76,7 @@ def main():
     application.add_handler(CommandHandler("start", start))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
-    print("🟢 Бот запущен")
+    logger.info("🟢 Бот запущен")
     application.run_polling()
 
 if __name__ == '__main__':
