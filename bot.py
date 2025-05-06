@@ -19,17 +19,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if "youtube.com" in url or "youtu.be" in url:
         await update.message.reply_text("Скачиваю видео... ⏳")
         try:
-            # Скачивание видео с помощью yt-dlp
+            # Скачивание видео с помощью yt-dlp + cookies.json
             ydl_opts = {
                 'format': 'mp4',
                 'outtmpl': 'video.mp4',
+                'cookiefile': 'cookies.json',  # ← подключаем файл с куками
             }
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([url])
             video_path = "video.mp4"
 
             # Получаем название видео
-            with yt_dlp.YoutubeDL() as ydl:
+            with yt_dlp.YoutubeDL({'cookiefile': 'cookies.json'}) as ydl:
                 info_dict = ydl.extract_info(url, download=False)
                 video_title = info_dict.get('title', 'audio').replace("/", "_").replace("\\", "_")
 
