@@ -1,6 +1,7 @@
 import os
 import logging
 import requests
+import yt_dlp
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
@@ -11,7 +12,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Конфигурация API (через переменные окружения)
+# Конфигурация API
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY")
 API_HOST = "youtube-mp3-2025.p.rapidapi.com"
@@ -19,6 +20,41 @@ API_URL = "https://youtube-mp3-2025.p.rapidapi.com/v1/social/youtube/audio"
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🎵 Привет! Отправь мне ссылку на YouTube видео, и я пришлю аудио.")
+
+def extract_video_id(url: str) -> str:
+    """Извлекает ID видео из различных форматов ссылок"""
+    # Очистка URL от параметров и якорей
+    clean_url = url.split("?")[0].split("#")[0]
+    
+    if "youtu.be/" in clean_url:
+        return clean_url.split("youtu.be/")[1].split("/")[0]
+    if "v=" in clean_url:
+        return clean_url.split("v=")[1].split("&")[0]
+    if "embed/" in clean_url:
+        return clean_url.split("embed/")[1].split("/")[0]
+    return clean_url.split("/")[-1]
+
+def download_audio(url: str) -> str:
+    """Резервное скачивание через yt-dlp"""
+    ydl_opts = {
+        'format': 'bestaudio/best',
+        'postprocessors': [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'mp3',
+            'preferredquality': '192',
+        }],
+        'outtmpl': 'downloads/%(title)s.%(ext)s',
+        'quiet': True
+    }
+    
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            filename = ydl.prepare_filename(info).replace(".webm", ".mp3")
+            return filename
+    except Exception as e:
+        logger.error(f"Ошибка yt-dlp: {str(e)}", exc_info=True)
+        return None
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -28,51 +64,48 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         video_id = extract_video_id(url)
+        logger.info(f"Извлеченный ID: {video_id}")
+
+        # Попытка через RapidAPI
+        params = {"id": video_id, "ext": "mp3", "quality": "128kbps"}
+        headers = {"X-RapidAPI-Host": API_HOST, "X-RapidAPI-Key": RAPIDAPI_KEY}
         
-        # Параметры запроса
-        params = {
-            "id": video_id,
-            "ext": "mp3",
-            "quality": "128kbps"
-        }
+        response = requests.get(API_URL, headers=headers, params=params)
+        logger.info(f"Ответ API: {response.status_code} - {response.text}")
 
-        # Отправка запроса к API
-        response = requests.get(
-            API_URL,
-            headers={
-                "X-RapidAPI-Host": API_HOST,
-                "X-RapidAPI-Key": RAPIDAPI_KEY
-            },
-            params=params
-        )
-
-        # Обработка ответа
         if response.status_code == 200:
             data = response.json()
-            if data.get("url"):
+            if data.get("status") == "ok" and data.get("url"):
                 await update.message.reply_audio(
                     audio=data["url"],
                     title=data.get("title", "Аудио")[:64],
                     duration=data.get("duration", 0)
                 )
-            else:
-                await update.message.reply_text("❌ Аудио не найдено")
+                return
+            error_msg = data.get('msg', 'Аудио не найдено')
         else:
-            await update.message.reply_text(f"⚠️ Ошибка API: {response.status_code}")
+            error_msg = f"Ошибка API: {response.status_code}"
+
+        # Резервный метод через yt-dlp
+        await update.message.reply_text(f"⚠️ {error_msg}. Пробую через резервный метод...")
+        
+        audio_path = download_audio(url)
+        if audio_path:
+            try:
+                await update.message.reply_audio(audio=open(audio_path, "rb"))
+            finally:
+                os.remove(audio_path)  # Удаление файла после отправки
+        else:
+            await update.message.reply_text("❌ Не удалось получить аудио ни одним способом")
 
     except Exception as e:
-        logger.error(f"Ошибка: {str(e)}")
-        await update.message.reply_text("🚫 Произошла ошибка. Попробуйте позже.")
-
-def extract_video_id(url: str) -> str:
-    """Извлекает ID видео из разных форматов ссылок"""
-    if "youtu.be/" in url:
-        return url.split("youtu.be/")[1].split("?")[0]
-    if "v=" in url:
-        return url.split("v=")[1].split("&")[0]
-    return url.split("/")[-1]
+        logger.error(f"Критическая ошибка: {str(e)}", exc_info=True)
+        await update.message.reply_text("🚫 Произошла внутренняя ошибка. Попробуйте позже.")
 
 if __name__ == "__main__":
+    # Создаем папку для загрузок
+    os.makedirs("downloads", exist_ok=True)
+    
     # Инициализация бота
     app = Application.builder().token(TELEGRAM_TOKEN).build()
     
