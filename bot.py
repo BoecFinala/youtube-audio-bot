@@ -1,83 +1,64 @@
-import os
-import logging
-from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
-import requests  # Заменяем aiohttp на синхронные запросы
+import requests
+from bs4 import BeautifulSoup
+from telegram import Update, InputFile
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
+import asyncio
+import nest_asyncio
 
-# Настройка логгера
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.INFO
-)
-logger = logging.getLogger(__name__)
+nest_asyncio.apply()
 
-# Безопасное хранение данных
-TOKEN = os.getenv("8027258642:AAFjyM9Bze0bXITSOKKwBYjnxJ5Vt6JpLAk")  # Получаем из переменных окружения
-RAPID_API_KEY = os.getenv("d6b3cbc8c6msh937aca5d90c4dc5p1c1a7fjsn8d19c67c0361")
-RAPID_API_HOST = "youtube-mp3.p.rapidapi.com"
-RAPID_API_URL = "https://youtube-mp3.p.rapidapi.com/get"
+TOKEN = '8027258642:AAFjyM9Bze0bXITSOKKwBYjnxJ5Vt6JpLAk'
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🎵 Привет! Пришли ссылку на YouTube видео, и я отправлю тебе аудио!")
+    await update.message.reply_text("Привет! Скинь ссылку на YouTube — я вырежу аудио и пришлю тебе 🎧")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = update.message.text.strip()
     
-    try:
-        # Проверка и извлечение ID
-        video_id = extract_video_id(url)
-        if not video_id:
-            raise ValueError("Некорректная YouTube ссылка")
+    if "youtube.com" in url or "youtu.be" in url:
+        await update.message.reply_text("Обрабатываю... ⏳")
         
-        await update.message.reply_text("⏳ Обрабатываю запрос...")
+        try:
+            # Формируем POST-запрос к сервису
+            data = {'video_url': url}
+            response = requests.post('https://www.youtube-audio-extractor.com/extract', data=data)
 
-        # Отправка запроса к API
-        response = requests.get(
-            RAPID_API_URL,
-            headers={
-                "X-RapidAPI-Key": RAPID_API_KEY,
-                "X-RapidAPI-Host": RAPID_API_HOST
-            },
-            params={"id": video_id}
-        )
+            if response.status_code == 200:
+                soup = BeautifulSoup(response.text, 'html.parser')
+                download_link = soup.find('a', {'class': 'download_file'})
 
-        if response.status_code != 200:
-            raise Exception(f"Ошибка API: {response.text}")
+                if download_link and 'href' in download_link.attrs:
+                    mp3_url = download_link['href']
+                    title = soup.find('input', {'id': 'file_name'}).get('value', 'audio').replace("/", "_").replace("\\", "_") + ".mp3"
 
-        data = response.json()
+                    # Загружаем и отправляем аудиофайл
+                    with requests.get(mp3_url, stream=True) as r:
+                        r.raise_for_status()
+                        with open(title, 'wb') as f:
+                            for chunk in r.iter_content(chunk_size=8192):
+                                f.write(chunk)
+
+                    with open(title, 'rb') as audio_file:
+                        await update.message.reply_audio(audio_file)
+
+                    # Очистка
+                    os.remove(title)
+                else:
+                    await update.message.reply_text("Не удалось найти аудиофайл.")
+            else:
+                await update.message.reply_text(f"Ошибка сервера: {response.status_code}")
         
-        if data.get("status") != "ok":
-            raise Exception(data.get("msg", "Неизвестная ошибка сервиса"))
+        except Exception as e:
+            await update.message.reply_text(f"Ошибка при обработке: {str(e)}")
+    else:
+        await update.message.reply_text("Пришли корректную ссылку с YouTube.")
 
-        # Отправка аудио
-        await update.message.reply_audio(
-            audio=data['link'],
-            title=f"{data.get('title', 'audio')[:64]}.mp3",
-            performer="YouTube Audio Bot"
-        )
-
-    except Exception as e:
-        logger.error(f"Error: {str(e)}")
-        await update.message.reply_text(f"❌ Ошибка: {str(e)}")
-
-def extract_video_id(url: str) -> str:
-    # Улучшенная обработка разных форматов ссылок
-    if "youtube.com/watch?v=" in url:
-        return url.split("v=")[1].split("&")[0]
-    if "youtu.be/" in url:
-        return url.split("youtu.be/")[1].split("?")[0]
-    if "youtube.com/embed/" in url:
-        return url.split("embed/")[1].split("?")[0]
-    return None
-
-def main():
-    application = Application.builder().token(TOKEN).build()
-    
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    
-    logger.info("🟢 Бот запущен")
-    application.run_polling()
+async def main():
+    app = ApplicationBuilder().token(TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    print("Бот запущен...")
+    await app.run_polling(drop_pending_updates=True)
 
 if __name__ == '__main__':
-    main()
+    asyncio.run(main())
