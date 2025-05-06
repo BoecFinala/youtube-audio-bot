@@ -10,7 +10,7 @@ TOKEN = '8027258642:AAFjyM9Bze0bXITSOKKwBYjnxJ5Vt6JpLAk'
 
 # Настройки API
 RAPID_API_KEY = "d6b3cbc8c6msh937aca5d90c4dc5p1c1a7fjsn8d19c67c0361"
-RAPID_API_HOST = "youtube-mp36.p.rapidapi.com/get"
+RAPID_API_HOST = "https://youtube-mp36.p.rapidapi.com/get"
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Привет! Скинь ссылку на YouTube — я отправлю тебе аудиодорожку через сторонний сервис 🎧")
@@ -24,7 +24,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Отправляем запрос на внешний сервис
         headers = {
             "X-RapidAPI-Key": RAPID_API_KEY,
-            "X-RapidAPI-Host": RAPID_API_HOST
+            "X-RapidAPI-Host": "youtube-mp36.p.rapidapi.com"
         }
         params = {"url": url}
 
