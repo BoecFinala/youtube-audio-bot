@@ -1,5 +1,6 @@
-import requests
+import os
 import logging
+import requests
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
@@ -10,8 +11,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Конфигурация API
-API_KEY = "d6b3cbc8c6msh937aca5d90c4dc5p1c1a7fjsn8d19c67c0361"
+# Конфигурация API (через переменные окружения)
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY")
 API_HOST = "youtube-mp3-2025.p.rapidapi.com"
 API_URL = "https://youtube-mp3-2025.p.rapidapi.com/v1/social/youtube/audio"
 
@@ -27,18 +29,24 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         video_id = extract_video_id(url)
         
+        # Параметры запроса
         params = {
             "id": video_id,
             "ext": "mp3",
             "quality": "128kbps"
         }
 
+        # Отправка запроса к API
         response = requests.get(
             API_URL,
-            headers={"X-RapidAPI-Host": API_HOST, "X-RapidAPI-Key": API_KEY},
+            headers={
+                "X-RapidAPI-Host": API_HOST,
+                "X-RapidAPI-Key": RAPIDAPI_KEY
+            },
             params=params
         )
 
+        # Обработка ответа
         if response.status_code == 200:
             data = response.json()
             if data.get("url"):
@@ -57,6 +65,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("🚫 Произошла ошибка. Попробуйте позже.")
 
 def extract_video_id(url: str) -> str:
+    """Извлекает ID видео из разных форматов ссылок"""
     if "youtu.be/" in url:
         return url.split("youtu.be/")[1].split("?")[0]
     if "v=" in url:
@@ -64,7 +73,20 @@ def extract_video_id(url: str) -> str:
     return url.split("/")[-1]
 
 if __name__ == "__main__":
-    app = Application.builder().token("8027258642:AAFjyM9Bze0bXITSOKKwBYjnxJ5Vt6JpLAk").build()
+    # Инициализация бота
+    app = Application.builder().token(TELEGRAM_TOKEN).build()
+    
+    # Регистрация обработчиков
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    app.run_polling()
+    
+    # Конфигурация для Render
+    if os.getenv("RENDER"):
+        app.run_webhook(
+            listen="0.0.0.0",
+            port=int(os.getenv("PORT", 10000)),
+            webhook_url=os.getenv("WEBHOOK_URL"),
+            secret_token=os.getenv("SECRET_TOKEN", "DEFAULT_SECRET")
+        )
+    else:
+        app.run_polling()

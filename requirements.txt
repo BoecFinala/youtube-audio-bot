@@ -1,6 +1,2 @@
 python-telegram-bot==20.3
-yt-dlp
-moviepy
-nest_asyncio
-requests
-beautifulsoup4
+requests==2.32.3
