@@ -1,4 +1,8 @@
 python-telegram-bot==20.3
 yt-dlp
 moviepy
+<<<<<<< HEAD
 nest_asyncio
+=======
+nest_asyncio
+>>>>>>> dd3ea44c3cea7fc83ba9d857622271b2f74de6f3
